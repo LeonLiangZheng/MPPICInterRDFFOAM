@@ -1,0 +1,14 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/wmake/scripts/AllwmakeParseArguments
+#------------------------------------------------------------------------------
+
+# The compressibleTwoPhaseMixtureTurbulenceModels library is the same one
+# shipped with MPPICInterFoam. If that library is already present in
+# $FOAM_LIBBIN (because MPPICInterFoam is installed), this wmake is a
+# no-op; otherwise it builds it here.
+wmake $targetType compressibleTwoPhaseMixtureTurbulenceModels
+
+wmake $targetType
+
+#------------------------------------------------------------------------------
