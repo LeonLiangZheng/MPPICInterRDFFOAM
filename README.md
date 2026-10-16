@@ -16,7 +16,6 @@ particle cloud. They start from the stock `MPPICInterFoam` and change two things
 |---|---|---|
 | [`MPPICInterIsoRDFFoam/`](MPPICInterIsoRDFFoam) | current | isoAdvector transport + curvature switchable between RDF and CSF at run time |
 | [`MPPICInterIsoFoam/`](MPPICInterIsoFoam) | current | isoAdvector transport, CSF curvature only; the baseline for A/B comparison |
-| [`variants/noDAlphac/`](variants/noDAlphac) | diagnostic | an alternative `alphaEqn.H` for a known issue, see [below](#variant-nodalphac) |
 | [`legacy/MPPICInterRDFFoam/`](legacy/MPPICInterRDFFoam) | superseded | the first version (April 2026): MULES transport, RDF only for curvature |
 
 Companion libraries, often used with these solvers:
@@ -38,6 +37,8 @@ isoAdvector can solve directly:
 
     ∂α/∂t + ∇·(α·U) = Su/αc + (Sp/αc − D/αc)·α,     D = ∂αc/∂t + ∇·(αc·U)
 
+`MPPICInterIsoFoam` solves this equation as written; `MPPICInterIsoRDFFoam`
+leaves out the `−D/αc` term, for the reason given [below](#the-d-term).
 `αc` is clipped from below by `alphacMinClip` (default 0.05) wherever it is a
 denominator. The mass flux is rebuilt as
 `rhoPhi = αcf·alphaPhi·(ρ1 − ρ2) + αcf·phi·ρ2`, so it stays consistent with the
@@ -139,12 +140,11 @@ Verified:
 - `MPPICInterIsoFoam` runs a test case on an HPC cluster.
 - `MPPICInterIsoRDFFoam` enters and advances the time loop on a multi-bubble
   reactor case, and has been run in RDF mode on a droplet-impact case, which is
-  where the issue under [noDAlphac](#variant-nodalphac) showed up.
+  where the issue described under [The D term](#the-d-term) showed up.
 
 Not yet verified:
 
-- that `MPPICInterIsoRDFFoam` with `curvatureModel CSF` reproduces
-  `MPPICInterIsoFoam` bit for bit;
+- how much water mass drifts once the `D` term is left out;
 - how much RDF reduces spurious currents compared with CSF (static-droplet test);
 - RDF curvature when many bubbles split and merge: the PLIC surface jumps, and
   so does the RDF. If curvature looks unphysical, rerun with `curvatureModel CSF`
@@ -154,7 +154,7 @@ Other limits: RDF acts only inside the band; the small regularisation `deltaN`
 is computed once from the mean cell size, so it is not updated under dynamic
 mesh refinement.
 
-## Variant: noDAlphac
+## The D term
 
 In RDF mode, the RDF field inside droplets showed faint speckles at the cells
 that hold particles. The suspected cause is the term `D = ∂αc/∂t + ∇·(αc·U)`:
@@ -164,11 +164,13 @@ residual wherever particles cross cells. Fed into the α equation, it nudges α
 away from 1 inside the liquid, PLIC then marks those cells as interface cells,
 and the RDF is built around them.
 
-[`variants/noDAlphac/alphaEqn.H`](variants/noDAlphac/alphaEqn.H) drops the
-`−D/αc` term. The price is that `αc·α` is no longer conserved exactly; the drift
-should be small for dilute clouds but has not been measured. To try it, copy
-the file over `alphaEqn.H` in either solver and rebuild. It is a diagnostic,
-not a validated fix.
+Since 2026-05-19 `MPPICInterIsoRDFFoam` therefore leaves the `−D/αc` term out
+of its `alphaEqn.H`. The price is that `αc·α` is no longer conserved exactly;
+the drift should be small for dilute clouds but has not been measured, and
+dense clouds (`αc` well below 1) may need a different fix. The two solvers'
+`alphaEqn.H` files differ only in this term: to put it back, copy
+`MPPICInterIsoFoam/alphaEqn.H` over `MPPICInterIsoRDFFoam/alphaEqn.H` and
+rebuild.
 
 ## History
 
@@ -176,7 +178,7 @@ not a validated fix.
 |---|---|
 | 2026-04-16 | `MPPICInterRDFFoam`: MULES transport kept, an auxiliary isoAdvection object used only to reconstruct the interface for RDF curvature. Now in `legacy/`. |
 | 2026-04-22 | Rewrite: `MPPICInterIsoFoam` (isoAdvector transport) and `MPPICInterIsoRDFFoam` (plus switchable RDF curvature sharing the same advector). |
-| 2026-05-19 | `noDAlphac` diagnostic variant of `alphaEqn.H`. |
+| 2026-05-19 | `MPPICInterIsoRDFFoam` leaves the `−D/αc` term out of the α equation. |
 
 ## License
 

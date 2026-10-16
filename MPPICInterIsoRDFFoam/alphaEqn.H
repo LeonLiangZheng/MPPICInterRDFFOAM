@@ -1,19 +1,36 @@
 // ============================================================================
-// alphaEqn.H （方案 A 核心）
+// alphaEqn.H （方案 A 核心 —— 诊断变体 v3.1-noDAlphac）
 // ----------------------------------------------------------------------------
 // 目的：用 isoAdvector 几何输运替换 MULES，同时保持 MPPIC 的 αc 加权物理。
 //
 // 原 MPPIC α 方程（αc 加权）：
 //     ∂(αc·α1)/∂t + ∇·(αc·α1·U) = Su + Sp·α1
 //
-// 方案 A 变形（链式法则 + 除以 αc）：
+// 完整方案 A 变形（链式法则 + 除以 αc）：
 //     ∂α1/∂t + ∇·(α1·U) = Su/αc − (α1/αc)·[∂αc/∂t + ∇·(αc·U)]
+//                       = Su/αc − (α1/αc)·dAlphac
 //
-// 等价写成 Sp'·α1 + Su' 形式：
+// 即 Sp'·α1 + Su' 形式：
 //     Su' = Su/αc
-//     Sp' = Sp/αc − dAlphac/αc ,    其中 dAlphac = ∂αc/∂t + ∇·(αc·U)
+//     Sp' = Sp/αc − dAlphac/αc
 //
-// 左端正是 isoAdvector::advect(Sp', Su') 可直接消化的形式。
+// ─── 诊断变体修改（2026-05-19） ─────────────────────────────────────────
+//   去掉 dAlphac/αc 注入项，目的：验证 RDF 内部 mottle 是否由 dAlphac
+//   离散残差驱动 α1 偏离 1.0、触发 PLIC 在液滴内部产生假界面所致。
+//
+//   理论 dAlphac = ∂αc/∂t + ∇·(αc·U) ≡ 0（载流体连续性方程），
+//   但本求解器中：
+//     - αc 由 kinematicCloud.theta() 粒子统计投影得到（非守恒 PDE 解）
+//     - phi 由动量方程解出的 U 插值得到
+//   两者不被同一守恒律耦合，dAlphac 在粒子运动 cell 处出现量级
+//   ~10⁵–10⁶ s⁻¹ 的离散残差 spike。注入 α 方程后驱使 α1 偏离 1.0
+//   一个 ~0.1 量级的扰动，远超 surfCellTol（默认 1e-6），触发 PLIC
+//   在液滴内部把粒子 cell 误判为 partial cell → 假界面 → 污染 RDF。
+//
+//   代价：牺牲严格的 αc·α 离散守恒等价性。
+//   预期影响：稀粒子云 (αc > 0.95) 下水质量漂移 << 1%，可接受。
+//   日后若需恢复严格守恒，考虑：dAlphac 加界面 mask、或粒子 cell 限幅。
+// ────────────────────────────────────────────────────────────────────────
 // ============================================================================
 
 {
@@ -34,25 +51,16 @@
     );
     const volScalarField alphacSafe("alphacSafe", max(alphac, alphacMinClip));
 
-    // --- 步骤 3：计算 αc 的变化项 dAlphac = ∂αc/∂t + ∇·(αc·U)
-    //    量纲：dimless/dimTime （与 Sp 匹配）
-    //    注：用 alphacf*phi 代替 αc·U，保持面中心有限体积离散
-    //    【方案 A 变形点】右端"αc 链式修正项"
-    const volScalarField dAlphac
-    (
-        "dAlphac",
-        fvc::ddt(alphac) + fvc::div(alphacf*phi)
-    );
-
-    // --- 步骤 4：变形 Sp、Su
-    //    Sp' = Sp/αc − dAlphac/αc
-    //    Su' = Su/αc
-    //    【方案 A 变形点】核心一行（Internal 运算）
+    // --- 步骤 3：变形 Sp、Su（诊断变体：去掉 dAlphac 注入项）
+    //    完整方案 A 应该是：
+    //        Su' = Su/αc
+    //        Sp' = Sp/αc − dAlphac/αc
+    //    现在仅保留 Su/αc 与 Sp/αc，dAlphac 项被有意删除。
+    //    详见文件头部注释段。
     Su = Su/alphacSafe.internalField();
-    Sp = Sp/alphacSafe.internalField()
-       - dAlphac.internalField()/alphacSafe.internalField();
+    Sp = Sp/alphacSafe.internalField();
 
-    // --- 步骤 5：isoAdvector 几何输运
+    // --- 步骤 4：isoAdvector 几何输运
     //    内部会调用 surf().reconstruct() 做 PLIC，然后按 dt 解析几何
     //    通量。α1 被原地更新，advector.alphaPhi() 存储 α1 的面通量
     //    (α1f·phi，量纲 m^3/s，不含 αc 加权)。
@@ -64,7 +72,7 @@
         U += fvc::reconstruct(mesh.phi());
     }
 
-    // --- 步骤 6：组装 αc 加权的质量通量 rhoPhi
+    // --- 步骤 5：组装 αc 加权的质量通量 rhoPhi
     //    【接力文档 §7 修正点 —— 重要】
     //    原文档写的 "rhoPhi = advector.alphaPhi()*(rho1f-rho2f) + alphacf*phi*rho2f"
     //    缺少第一项的 αcf 加权，导致与原 UEqn/pEqn 的 αc 加权物理不一致。
