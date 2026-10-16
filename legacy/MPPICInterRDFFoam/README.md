@@ -1,23 +1,23 @@
+# MPPICInterRDFFoam (legacy)
+
 > **Superseded.** This is the first (April 2026) version of the solver, kept for
 > reference. It keeps MULES transport and runs an auxiliary isoAdvection object only
 > to reconstruct the interface. The current solvers are in
-> [`../../MPPICInterIsoRDFFoam`](../../MPPICInterIsoRDFFoam) and
-> [`../../MPPICInterIsoFoam`](../../MPPICInterIsoFoam); see the top-level README.
+> [`MPPICInterIsoRDFFoam`](../../MPPICInterIsoRDFFoam) and
+> [`MPPICInterIsoFoam`](../../MPPICInterIsoFoam); see the [top-level README](../../README.md).
 
-================================================================================
-  MPPICInterRDFFoam  —  MPPICInterFoam with RDF-based interface curvature
-================================================================================
+MPPICInterFoam with RDF-based interface curvature, derived from two OpenFOAM
+v2212 (ESI) solvers:
 
-Derived from two OpenFOAM v2212 (ESI) solvers:
-  - MPPICInterFoam  : MULES VOF + MPPIC Lagrangian cloud
-  - interIsoFoam    : isoAdvection geometric VOF + reconstructedDistanceFunction
+- `MPPICInterFoam`: MULES VOF + MPPIC Lagrangian cloud
+- `interIsoFoam`: isoAdvection geometric VOF + reconstructedDistanceFunction
 
 The alpha transport in this solver remains MULES (identical to MPPICInterFoam)
 so that the continuous-phase fraction coupling with the kinematicCloud is
-untouched. What this solver ADDS is an auxiliary isoAdvection object used
+untouched. What this solver adds is an auxiliary isoAdvection object used
 purely for geometric interface reconstruction, from which a smooth
 reconstructed distance function (RDF) is obtained. The interface curvature
-kappa used in the CSF surface-tension source term is then computed as
+used in the CSF surface-tension source term is then computed as
 
     kappa_RDF  =  -div( grad(RDF) / |grad(RDF)| )
 
@@ -27,12 +27,11 @@ algebraic CSF curvature
     kappa_CSF  =  -div( grad(alpha) / |grad(alpha)| )      ( = mixture.K() )
 
 elsewhere. This preserves the Kistler dynamic contact-angle treatment at
-wall-adjacent cells, which is carried by mixture.nHatf() in CSF.
+wall-adjacent cells, which is carried by `mixture.nHatf()` in CSF.
 
+## 1. Directory layout
 
---------------------------------------------------------------------------------
-1.  Directory layout
---------------------------------------------------------------------------------
+```
 MPPICInterRDFFoam/
 |-- MPPICInterRDFFoam.C            main solver
 |-- sigmaKRDF.H                    RDF curvature helper (declaration)
@@ -43,226 +42,173 @@ MPPICInterRDFFoam/
 |-- continuityErrs.H, correctPhi.H unchanged
 |-- Make/files, Make/options       build rules
 |-- Allwmake, Allwclean            convenience scripts
-|-- compressibleTwoPhaseMixtureTurbulenceModels/
-|   `-- ...                        (the same library MPPICInterFoam ships)
+`-- compressibleTwoPhaseMixtureTurbulenceModels/
+                                   (the same library MPPICInterFoam ships)
+```
 
+## 2. Build
 
---------------------------------------------------------------------------------
-2.  Build
---------------------------------------------------------------------------------
-Source OpenFOAM-v2212 first:
-
-    source /path/to/OpenFOAM-v2212/etc/bashrc
-
-then from inside the MPPICInterRDFFoam/ directory:
-
-    ./Allwmake
+```bash
+source /path/to/OpenFOAM-v2212/etc/bashrc
+cd legacy/MPPICInterRDFFoam
+./Allwmake
+```
 
 or, equivalently:
 
-    wmake libso compressibleTwoPhaseMixtureTurbulenceModels
-    wmake
+```bash
+wmake libso compressibleTwoPhaseMixtureTurbulenceModels
+wmake
+```
 
-The first line builds the mixture-turbulence library (this is the same
-library that MPPICInterFoam ships with; if MPPICInterFoam is already
-installed on the system, its libcompressibleTwoPhaseMixtureTurbulenceModels
-is reused and this step is a no-op). The second line builds the solver
-itself into $FOAM_USER_APPBIN.
+The first line builds the mixture-turbulence library (the same library that
+MPPICInterFoam ships with; if MPPICInterFoam is already installed, its
+`libcompressibleTwoPhaseMixtureTurbulenceModels` is reused and this step is a
+no-op). The second line builds the solver itself into `$FOAM_USER_APPBIN`.
+To clean, run `./Allwclean`.
 
-To clean:
+## 3. Required case-file changes
 
-    ./Allwclean
+### 3.1 `system/fvSolution`, PIMPLE
 
+Add the curvature-model keyword and (if using the RDF path) the `*Final`
+entries required by v2212 when `nCorrectors > 1`.
 
---------------------------------------------------------------------------------
-3.  Required case-file changes
---------------------------------------------------------------------------------
+```
+PIMPLE
+{
+    momentumPredictor            yes;
+    nOuterCorrectors             3;
+    nCorrectors                  3;
+    nNonOrthogonalCorrectors     0;
 
-3.1  system/fvSolution
-------------------------
+    // --- New keywords ---
+    curvatureModel               RDF;   // or CSF (default = original behaviour)
+    RDFbandWidth                 4;     // narrow band, in cell layers (default 4)
+    RDFcurvSmoothCoeff           0.5;   // 0..1 Laplacian smoothing (default 0.5)
+    RDFnSmoothIter               2;     // smoothing passes on kappa_RDF (default 2)
+}
+```
 
-Add two things inside the PIMPLE sub-dictionary: the curvature-model
-keyword and (if using the RDF path) the *Final entries required by v2212
-when nCorrectors > 1.
+When `curvatureModel` is absent or set to `CSF`, the solver is numerically
+equivalent to MPPICInterFoam; the RDF machinery is not even instantiated.
 
-    PIMPLE
-    {
-        momentumPredictor            yes;
-        nOuterCorrectors             3;
-        nCorrectors                  3;
-        nNonOrthogonalCorrectors     0;
+### 3.2 `system/fvSolution`, alpha solver block
 
-        // --- New keywords ---
-        curvatureModel               RDF;   // or CSF (default = original behaviour)
-        RDFbandWidth                 4;     // narrow band, in cell layers (default 4)
-        RDFcurvSmoothCoeff           0.5;   // 0..1 Laplacian smoothing (default 0.5)
-        RDFnSmoothIter               2;     // smoothing passes on kappa_RDF (default 2)
-    }
+The auxiliary isoAdvection object reads its controls from the alpha solver
+block, in the same way interIsoFoam does. Even though isoAdvector is not used
+for transport, include these entries for robust reconstruction:
 
-When curvatureModel is absent or set to CSF, the solver is byte-for-byte
-equivalent in numerics to MPPICInterFoam — the RDF machinery is not
-even instantiated.
+```
+"alpha.water.*"
+{
+    // --- existing MULES entries (keep them) ---
+    nAlphaCorr       2;
+    nAlphaSubCycles  2;
+    cAlpha           2;
+    MULESCorr        no;
+    nLimiterIter     10;
+    solver           smoothSolver;
+    smoother         symGaussSeidel;
+    tolerance        1e-8;
+    relTol           0;
+    maxIter          100;
 
+    // --- isoAdvector reconstruction controls ---
+    isoFaceTol       1e-10;
+    surfCellTol      1e-8;
+    nAlphaBounds     3;
+    snapTol          1e-12;
+    clip             true;
 
-3.2  system/fvSolution (isoAdvector sub-dict)
-----------------------------------------------
+    // --- PLIC reconstruction scheme (default is plicRDF) ---
+    reconstructionScheme plicRDF;  // or isoAlpha, gradAlpha
+}
+```
 
-The auxiliary isoAdvection object reads an "isoAdvector" sub-dict inside
-the alpha1 solver block, in the same way interIsoFoam does. Even if you
-are not using isoAdvector for transport, include this block for robust
-reconstruction:
-
-    "alpha.water.*"
-    {
-        // --- existing MULES entries (keep them) ---
-        nAlphaCorr       2;
-        nAlphaSubCycles  2;
-        cAlpha           2;
-        MULESCorr        no;
-        nLimiterIter     10;
-        solver           smoothSolver;
-        smoother         symGaussSeidel;
-        tolerance        1e-8;
-        relTol           0;
-        maxIter          100;
-
-        // --- isoAdvector reconstruction controls ---
-        isoFaceTol       1e-10;
-        surfCellTol      1e-8;
-        nAlphaBounds     3;
-        snapTol          1e-12;
-        clip             true;
-
-        // --- PLIC reconstruction scheme (default is plicRDF) ---
-        reconstructionScheme plicRDF;  // or isoAlpha, gradAlpha
-    }
-
-
-3.3  system/fvSchemes
-----------------------
+### 3.3 `system/fvSchemes`
 
 No changes required beyond what MPPICInterFoam already needs. The extra
-fvc::grad(rdf) and fvc::div(nRDF) operators in sigmaKRDF.C pick up the
-default ddt / grad / div schemes; if you want to tune them, add:
+`fvc::grad(rdf)` and `fvc::div(nRDF)` operators in `sigmaKRDF.C` pick up the
+default schemes; to tune them, add:
 
-    gradSchemes
-    {
-        grad(reconstructedDistanceFunction) Gauss linear;
-        grad(nRDF)                           Gauss linear;
-    }
+```
+gradSchemes
+{
+    grad(reconstructedDistanceFunction) Gauss linear;
+    grad(nRDF)                           Gauss linear;
+}
 
-    divSchemes
-    {
-        div(nRDF) Gauss linear;
-    }
+divSchemes
+{
+    div(nRDF) Gauss linear;
+}
+```
 
+## 4. Recommended first tests
 
---------------------------------------------------------------------------------
-4.  Recommended first tests (on the VM, before going to HPC)
---------------------------------------------------------------------------------
+1. **Baseline**: build, set `curvatureModel CSF`, run an existing
+   MPPICInterFoam case unchanged. Output should match MPPICInterFoam up to
+   round-off; if not, there is a build or include issue before RDF is even on
+   the table.
+2. **Static droplet**: a sphere of radius R in zero gravity, no particles, zero
+   initial velocity, `curvatureModel RDF`. Inspect `kappaRDF`, `kappaBlend` and
+   `sigmaKRDF`: the droplet should show kappa ≈ 2/R with a spread of a few
+   percent (CSF typically scatters by 20–40 % on the same mesh), and spurious
+   currents should drop by one to two orders of magnitude.
+3. **Short production test**: the real case with `curvatureModel RDF` on a
+   coarse mesh for about 10 time steps; compare the peak `p_rgh` against the
+   CSF run.
+4. Only then deploy to the cluster.
 
-Step 0   Baseline sanity — build with curvatureModel = CSF, run your
-         existing MPPICInterFoam case unchanged. Output should be
-         byte-identical (up to round-off) to MPPICInterFoam output. If
-         this step disagrees, there is a build/include issue before RDF
-         is even on the table.
+## 5. Known caveats
 
-Step 1   Static droplet test — put a sphere of radius R in zero gravity,
-         no MPPIC particles, zero initial velocity. Run with:
-             curvatureModel  RDF;
-         and inspect kappaRDF, kappaBlend, sigmaKRDF in the output. The
-         interior of the droplet should show kappa ~ 2/R with spread of
-         a few percent; in MPPICInterFoam (CSF) the same field typically
-         shows 20-40 % scatter on the same mesh. Spurious currents should
-         drop by 1-2 orders of magnitude.
+- RDF validity is limited to a narrow band. Cells outside it have undefined
+  RDF values; the blending mask makes those cells use CSF curvature. The band
+  is controlled by `RDFbandWidth`.
+- After strong topology changes (pinch-off, satellite droplets) the
+  reconstruction can produce multi-valued RDF near a just-formed daughter
+  droplet, and kappa_RDF may briefly be noisy. The Laplacian smoothing pass
+  (`RDFcurvSmoothCoeff`, `RDFnSmoothIter`) is the remedy; if noise persists,
+  increase `RDFnSmoothIter` to 3 or 4.
+- Where the interface meets a wall patch, `grad(RDF)` is ill-defined. The
+  Kistler contact-angle BC acts on alpha through `mixture.nHatf()` in the CSF
+  branch; because the band mask excludes many wall-adjacent cells, the blended
+  curvature uses CSF there and the contact-angle treatment is preserved. If
+  the contact line drifts, reduce `RDFbandWidth` (e.g. to 2).
+- Parallel: `zoneDistribute` and `reconstructedDistanceFunction` are
+  parallel-aware in v2212, but the solver has not been validated on more than
+  8 ranks; start a large run with a short (10-step) test to rule out deadlocks
+  in `zoneDistribute::setUpCommforZone`.
+- No dynamic mesh refinement: that would need `sigmaKRDF::update()` to rebuild
+  the RDF stencil after topology changes.
 
-Step 2   Your actual droplet-on-wire case, curvatureModel = RDF, on the
-         VM with the existing coarse mesh, ~10 time steps. Compare the
-         p_rgh peak magnitude at t ~ 0.5 ms against the CSF run:
-             CSF:  ~23800 Pa  (previous observation)
-             RDF:  target <~ 2000 Pa, well below MPPIC-induced peaks
+## 6. Dimensional check
 
-Step 3   Only then deploy to the HPC cluster with 64 ranks.
-
-
---------------------------------------------------------------------------------
-5.  Known caveats
---------------------------------------------------------------------------------
-
-- RDF validity is limited to a narrow band. Cells outside that band have
-  undefined RDF values; the blending mask ensures those cells use CSF
-  curvature instead. The band is controlled by RDFbandWidth.
-
-- After strong topology changes (droplet pinch-off, satellite formation)
-  the iso-surface reconstruction can produce multi-valued RDF in cells
-  close to a just-formed daughter droplet. In such cells kappa_RDF may
-  briefly be noisy. The Laplacian smoothing pass
-  (RDFcurvSmoothCoeff, RDFnSmoothIter) is the remedy; if noise persists,
-  increase RDFnSmoothIter to 3 or 4.
-
-- In cells where the interface coincides with a wall patch intersecting
-  the geometry (the wire surface), grad(RDF) is ill-defined. The Kistler
-  contact-angle BC is applied to alpha1 through mixture.nHatf() in the
-  CSF branch. Because the RDF narrow-band mask naturally excludes many
-  of these wall-adjacent cells, the blended kappa uses CSF there and
-  the contact-angle treatment is preserved. If the contact line shows
-  drift in validation, reduce RDFbandWidth (e.g. to 2) so that the mask
-  becomes tighter.
-
-- Parallel: zoneDistribute and reconstructedDistanceFunction are
-  parallel-aware in v2212. The solver has not been validated on >8
-  ranks by the author; the first production run on 64 ranks should be
-  a short (10-step) test to confirm absence of deadlocks in
-  zoneDistribute::setUpCommforZone for the specific decomposition.
-
-- This solver does NOT support dynamic mesh refinement. Adding it
-  would require additional logic in sigmaKRDF::update() to re-init the
-  RDF stencil after topology changes.
-
-
---------------------------------------------------------------------------------
-6.  Dimensional sanity check
---------------------------------------------------------------------------------
-
-mixture.sigma()    has dimensions [1 0 -2 0 0 0 0]  (kg/s^2, i.e. N/m)
-kappa              has dimensions [0 -1 0 0 0 0 0]  (1/length)
-sigmaK = sigma*K   has dimensions [1 -1 -2 0 0 0 0]
+```
+sigma              [1 0 -2 0 0 0 0]   (kg/s^2, i.e. N/m)
+kappa              [0 -1 0 0 0 0 0]   (1/length)
+sigmaK = sigma*K   [1 -1 -2 0 0 0 0]
 fvc::interpolate(sigmaK) * fvc::snGrad(alpha) * mesh.magSf()
-                   has dimensions [1 1 -2 0 0 0 0]  (N -- a force)
+                   [1 1 -2 0 0 0 0]   (N, a force)
+```
 
-This matches exactly the form used by mixture.surfaceTensionForce() in
-stock interFoam/interIsoFoam, so no scaling fix-ups are needed.
+This matches the form used by `mixture.surfaceTensionForce()` in stock
+interFoam / interIsoFoam, so no scaling fix-ups are needed.
 
-
---------------------------------------------------------------------------------
-7.  If the build fails
---------------------------------------------------------------------------------
+## 7. If the build fails
 
 Most likely causes, in order of frequency:
 
-(a) Missing geometricVoF library. Check:
-        ls $FOAM_SRC/transportModels/geometricVoF/lnInclude/isoAdvection.H
-    If absent, your OpenFOAM install does not have the geometric VOF
-    module. It ships with v2212 ESI by default, but may have been
-    stripped from a minimal install.
-
-(b) Linker error on -lgeometricVoF. Confirm:
-        ls $FOAM_LIBBIN/libgeometricVoF.so
-    If present but linker still fails, the ordering in Make/options
-    may matter; try moving -lgeometricVoF earlier in EXE_LIBS.
-
-(c) "unresolved reference to zoneDistribute::New". This class is in
-    libgeometricVoF in v2212; if you are on an older v-series and
-    zoneDistribute has been moved, check:
-        grep -r "class zoneDistribute" $FOAM_SRC/
-    and update the include path in Make/options accordingly.
-
-(d) Compiler warning about inheritance diamond for
-    reconstructedDistanceFunction. This is expected — the class derives
-    publicly from volScalarField. No action required unless -Werror is
-    set.
-
-
-================================================================================
-  End of README
-================================================================================
+- **Missing geometricVoF library.** Check
+  `ls $FOAM_SRC/transportModels/geometricVoF/lnInclude/isoAdvection.H`. It
+  ships with v2212 ESI by default but may be stripped from a minimal install.
+- **Linker error on `-lgeometricVoF`.** Confirm
+  `ls $FOAM_LIBBIN/libgeometricVoF.so`; if present, try moving
+  `-lgeometricVoF` earlier in `EXE_LIBS`.
+- **"unresolved reference to zoneDistribute::New".** The class is in
+  libgeometricVoF in v2212; on another version, find it with
+  `grep -r "class zoneDistribute" $FOAM_SRC/` and update `Make/options`.
+- **Warning about an inheritance diamond for reconstructedDistanceFunction.**
+  Expected (the class derives publicly from volScalarField); no action needed
+  unless `-Werror` is set.
