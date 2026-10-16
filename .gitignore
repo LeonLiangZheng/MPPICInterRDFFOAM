@@ -1,0 +1,6 @@
+# wmake build output
+Make/linux64*/
+lnInclude/
+*.o
+*.so
+*.dep

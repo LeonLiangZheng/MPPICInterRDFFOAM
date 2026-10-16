@@ -1,0 +1,14 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/wmake/scripts/AllwmakeParseArguments
+#------------------------------------------------------------------------------
+
+# 先编译 compressibleTwoPhaseMixtureTurbulenceModels 子库
+# （与 MPPICInterFoam 共用同名 .so，若已从 MPPICInterFoam 编过会被覆盖，
+#  符号内容完全相同，无功能影响）
+wmake $targetType compressibleTwoPhaseMixtureTurbulenceModels
+
+# 再编译主求解器可执行
+wmake $targetType
+
+#------------------------------------------------------------------------------

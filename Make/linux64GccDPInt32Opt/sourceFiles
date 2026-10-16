@@ -1,5 +1,0 @@
-SOURCE = \
-sigmaKRDF.C \
-MPPICInterRDFFoam.C \
-
-# sources
