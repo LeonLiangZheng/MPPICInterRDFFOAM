@@ -16,6 +16,7 @@ particle cloud. They start from the stock `MPPICInterFoam` and change two things
 |---|---|---|
 | [`MPPICInterIsoRDFFoam/`](MPPICInterIsoRDFFoam) | current | isoAdvector transport + curvature switchable between RDF and CSF at run time |
 | [`MPPICInterIsoFoam/`](MPPICInterIsoFoam) | current | isoAdvector transport, CSF curvature only; the baseline for A/B comparison |
+| [`variants/noDAlphac/`](variants/noDAlphac) | optional | an alternative `alphaEqn.H` that leaves out one term, see [The D term](#the-d-term) |
 | [`legacy/MPPICInterRDFFoam/`](legacy/MPPICInterRDFFoam) | superseded | the first version (April 2026): MULES transport, RDF only for curvature |
 
 Companion libraries, often used with these solvers:
@@ -23,6 +24,10 @@ Companion libraries, often used with these solvers:
 (dynamic contact-angle wall condition) and
 [KOmegaSST4MPPICInterFOAM](https://github.com/LeonLiangZheng/KOmegaSST4MPPICInterFOAM)
 (makes `kOmegaSST` selectable in the MPPICInterFoam family).
+
+`MPPICInterIsoRDFFoam` as shipped here, with the 2026-04-22 α equation, is the
+version used for the simulations in the paper this code accompanies. The
+reference will be added once the paper is published.
 
 ## How it works
 
@@ -37,8 +42,8 @@ isoAdvector can solve directly:
 
     ∂α/∂t + ∇·(α·U) = Su/αc + (Sp/αc − D/αc)·α,     D = ∂αc/∂t + ∇·(αc·U)
 
-`MPPICInterIsoFoam` solves this equation as written; `MPPICInterIsoRDFFoam`
-leaves out the `−D/αc` term, for the reason given [below](#the-d-term).
+Both solvers solve this equation as written; the optional variant that leaves
+out the `−D/αc` term is described [below](#the-d-term).
 `αc` is clipped from below by `alphacMinClip` (default 0.05) wherever it is a
 denominator. The mass flux is rebuilt as
 `rhoPhi = αcf·alphaPhi·(ρ1 − ρ2) + αcf·phi·ρ2`, so it stays consistent with the
@@ -144,7 +149,8 @@ Verified:
 
 Not yet verified:
 
-- how much water mass drifts once the `D` term is left out;
+- that `MPPICInterIsoRDFFoam` with `curvatureModel CSF` reproduces
+  `MPPICInterIsoFoam` bit for bit;
 - how much RDF reduces spurious currents compared with CSF (static-droplet test);
 - RDF curvature when many bubbles split and merge: the PLIC surface jumps, and
   so does the RDF. If curvature looks unphysical, rerun with `curvatureModel CSF`
@@ -164,13 +170,12 @@ residual wherever particles cross cells. Fed into the α equation, it nudges α
 away from 1 inside the liquid, PLIC then marks those cells as interface cells,
 and the RDF is built around them.
 
-Since 2026-05-19 `MPPICInterIsoRDFFoam` therefore leaves the `−D/αc` term out
-of its `alphaEqn.H`. The price is that `αc·α` is no longer conserved exactly;
-the drift should be small for dilute clouds but has not been measured, and
-dense clouds (`αc` well below 1) may need a different fix. The two solvers'
-`alphaEqn.H` files differ only in this term: to put it back, copy
-`MPPICInterIsoFoam/alphaEqn.H` over `MPPICInterIsoRDFFoam/alphaEqn.H` and
-rebuild.
+[`variants/noDAlphac/alphaEqn.H`](variants/noDAlphac/alphaEqn.H) (2026-05-19)
+leaves the `−D/αc` term out. It is optional and was not used for the paper's
+simulations. The price is that `αc·α` is no longer conserved exactly; the drift
+should be small for dilute clouds but has not been measured, and dense clouds
+(`αc` well below 1) may need a different fix. To try it, copy the file over
+`alphaEqn.H` in either solver and rebuild.
 
 ## History
 
@@ -178,7 +183,8 @@ rebuild.
 |---|---|
 | 2026-04-16 | `MPPICInterRDFFoam`: MULES transport kept, an auxiliary isoAdvection object used only to reconstruct the interface for RDF curvature. Now in `legacy/`. |
 | 2026-04-22 | Rewrite: `MPPICInterIsoFoam` (isoAdvector transport) and `MPPICInterIsoRDFFoam` (plus switchable RDF curvature sharing the same advector). |
-| 2026-05-19 | `MPPICInterIsoRDFFoam` leaves the `−D/αc` term out of the α equation. |
+| 2026-05-19 | `noDAlphac` variant of `alphaEqn.H`, without the `−D/αc` term. |
+| 2026-11-17 | `MPPICInterIsoRDFFoam` goes back to the full α equation, the version used for the paper; `noDAlphac` moves to `variants/`. |
 
 ## License
 
