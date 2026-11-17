@@ -106,7 +106,8 @@ PIMPLE
     curvatureModel   RDF;       // RDF or CSF (default CSF)
     RDFsigma         0.0728;    // N/m, must equal sigma in transportProperties
     RDFbandWidth     4;         // band width in cell layers
-    RDFnSmoothIter   0;         // smoothing of the RDF normal; keep 0 near contact lines
+    RDFnSmoothIter   0;         // smoothing of the RDF normal; default 0 protects contact lines
+                                // (the paper's runs used 2)
 }
 ```
 
